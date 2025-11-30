@@ -2,7 +2,7 @@ const mongoose = require("mongoose");
 
 const connectDB = async () => {
   try {
-    const uri = process.env.MONGO_URI;
+    const uri = process.env.MONGO_URI || "mongodb+srv://ashish:1qaz2wsx@cluster0.mtsnel0.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0";
     if (!uri) throw new Error("MONGO_URI not set in environment");
     await mongoose.connect(uri, { dbName: "cricketbox" });
     console.log("✅ MongoDB connected");
