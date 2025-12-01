@@ -138,14 +138,34 @@ exports.removeFriend = asyncWrapper(async (req, res) => {
 
 /**
  * Get incoming/outgoing requests & friends
+ * Returns requests with id field (not _id) for frontend consistency
  */
 exports.getRequestsAndFriends = asyncWrapper(async (req, res) => {
   const user = await User.findById(req.user.id)
     .select("friends requests")
-    .populate("friends.userId", "username")
-    .populate("requests.sent.userId", "username")
-    .populate("requests.received.userId", "username");
+    .populate("friends.userId", "username avatar")
+    .populate("requests.sent.userId", "username avatar")
+    .populate("requests.received.userId", "username avatar");
 
   if (!user) return res.status(404).json({ message: "User not found" });
-  res.json({ friends: user.friends, requests: user.requests });
+
+  // Transform _id to id for frontend
+  const transformRequests = (requests) =>
+    requests.map(r => ({
+      id: r.userId._id.toString(),
+      username: r.userId.username,
+      avatar: r.userId.avatar || null
+    }));
+
+  res.json({
+    friends: user.friends.map(f => ({
+      id: f.userId._id.toString(),
+      username: f.userId.username,
+      avatar: f.userId.avatar || null
+    })),
+    requests: {
+      sent: transformRequests(user.requests.sent),
+      received: transformRequests(user.requests.received)
+    }
+  });
 });
