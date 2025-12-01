@@ -144,7 +144,7 @@ exports.createRoom = asyncWrapper(async (req, res) => {
   const room = await Room.create({
     name: name || `${req.user.username}'s Room`,
     createdBy: userId,
-    participants: [mongoose.Types.ObjectId(userId)],
+    participants: [userId],
   });
 
   // set creator as default umpire optionally — keeping null is fine. Here we keep null so caller can assign.
