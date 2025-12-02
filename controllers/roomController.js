@@ -594,3 +594,19 @@ exports.chooseTossOption = asyncWrapper(async (req, res) => {
   
   res.json({ message: `Team ${room.tossWinner} chose to ${choice}`, tossChoice: choice, room });
 });
+
+/** Get rooms created by the logged-in user
+ * GET /rooms/my-created-rooms
+ */
+exports.getMyCreatedRooms = asyncWrapper(async (req, res) => {
+  const userId = req.user.id;
+
+  const rooms = await Room.find({ createdBy: userId })
+    .populate("participants", "username")
+    .sort({ createdAt: -1 });
+
+  res.json({
+    message: "My created rooms",
+    rooms,
+  });
+});

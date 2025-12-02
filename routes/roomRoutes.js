@@ -212,4 +212,6 @@ router.post("/:id/add-static-player", roomCtrl.addStaticPlayer);
 router.post("/:id/remove-static-player", roomCtrl.removeStaticPlayer);
 router.post("/:id/toss", roomCtrl.doToss);
 router.post("/:id/toss-choice", roomCtrl.chooseTossOption);
+router.get("/my-rooms", authenticate, roomCtrl.getMyCreatedRooms);
+
 module.exports = router;
