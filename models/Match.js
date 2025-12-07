@@ -9,7 +9,7 @@ const extrasSchema = new mongoose.Schema(
     legBye: { type: Number, default: 0 },
     penalty: { type: Number, default: 0 },
   },
-  { _id: false }
+  { id: false }
 );
 
 const ballSchema = new mongoose.Schema(
@@ -33,7 +33,7 @@ const ballSchema = new mongoose.Schema(
 
     commentary: { type: String, default: "" }
   },
-  { _id: false }
+  { id: false }
 );
 
 const batsmanStatSchema = new mongoose.Schema({
@@ -44,7 +44,7 @@ const batsmanStatSchema = new mongoose.Schema({
   sixes: { type: Number, default: 0 },
   isOut: { type: Boolean, default: false },
   dismissal: { type: String, default: null }
-}, { _id: false });
+}, { id: false });
 
 const bowlerStatSchema = new mongoose.Schema({
   name: { type: String, required: true },
@@ -53,7 +53,7 @@ const bowlerStatSchema = new mongoose.Schema({
   wickets: { type: Number, default: 0 },
   wides: { type: Number, default: 0 },
   noBalls: { type: Number, default: 0 }
-}, { _id: false });
+}, { id: false });
 
 const inningsSchema = new mongoose.Schema({
   teamName: { type: String, required: true },
@@ -79,7 +79,7 @@ const inningsSchema = new mongoose.Schema({
 
   // innings finished flag
   completed: { type: Boolean, default: false }
-}, { _id: false });
+}, { id: false });
 
 const matchSchema = new mongoose.Schema({
   roomId: { type: mongoose.Schema.Types.ObjectId, ref: "Room", required: true },

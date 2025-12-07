@@ -441,7 +441,7 @@ exports.addBall = asyncWrapper(async (req, res) => {
   await match.save();
   // Emit real-time update
   const io = req.app.get("io");
-  const roomId = match.roomId._id.toString();
+  const roomId = match.roomId.id.toString();
 
   io.to(roomId).emit("match:ball-update", {
     ballData: ballRecord,
@@ -574,7 +574,7 @@ exports.getScoreboard = asyncWrapper(async (req, res) => {
   }
 
   res.json({
-    matchId: match._id,
+    matchId: match.id,
     status: match.status,
     currentInningsIndex: match.currentInningsIndex,
     innings,
@@ -685,7 +685,7 @@ exports.selectNextBowler = asyncWrapper(async (req, res) => {
   // No state to store here — bowler is passed to addBall() on next ball
   // We only confirm it is valid bowler
    const io = req.app.get("io");
-  const roomId = match.roomId._id.toString();
+  const roomId = match.roomId.id.toString();
   
   io.to(roomId).emit("match:bowler-announced", {
     bowler,
@@ -783,7 +783,7 @@ exports.getMatchDetails = asyncWrapper(async (req, res) => {
 
   // BUILD FINAL RESPONSE
   const response = {
-    matchId: match._id,
+    matchId: match.id,
     status: match.status,
     result: match.result,
     toss: {
@@ -793,7 +793,7 @@ exports.getMatchDetails = asyncWrapper(async (req, res) => {
     oversLimit: match.innings?.[0]?.oversLimit || room.overs,
 
     room: {
-      id: room._id,
+      id: room.id,
       teamA: room.teamA,
       teamB: room.teamB,
       umpire: room.umpire,
@@ -815,7 +815,7 @@ exports.getAllMatches = asyncWrapper(async (req, res) => {
     .lean();
 
   const mapped = matches.map((m) => ({
-    matchId: m._id,
+    matchId: m.id,
     status: m.status,
     result: m.result,
     tossWinner: m.tossWinner,
@@ -823,7 +823,7 @@ exports.getAllMatches = asyncWrapper(async (req, res) => {
     createdAt: m.createdAt,
     updatedAt: m.updatedAt,
     room: {
-      id: m.roomId?._id,
+      id: m.roomId?.id,
       name: m.roomId?.name,
       teamA: m.roomId?.teamA,
       teamB: m.roomId?.teamB,
@@ -878,14 +878,14 @@ exports.getUserMatches = asyncWrapper(async (req, res) => {
       isParticipant
     ) {
       played.push({
-        matchId: match._id,
+        matchId: match.id,
         status: match.status,
         result: match.result,
         tossWinner: match.tossWinner,
         tossChoice: match.tossChoice,
         createdAt: match.createdAt,
         room: {
-          id: room._id,
+          id: room.id,
           name: room.name,
           teamA: room.teamA,
           teamB: room.teamB,

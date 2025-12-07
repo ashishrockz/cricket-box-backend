@@ -11,7 +11,7 @@ const playerRefSchema = new mongoose.Schema(
     },
     username: { type: String, required: true },
   },
-  { _id: false }
+  { id: false }
 );
 
 const teamSchema = new mongoose.Schema(
@@ -23,7 +23,7 @@ const teamSchema = new mongoose.Schema(
     staticCaptain: { type: String, default: null },
     staticPlayers: { type: [String], default: [] },
   },
-  { _id: false }
+  { id: false }
 );
 
 const roomSchema = new mongoose.Schema(

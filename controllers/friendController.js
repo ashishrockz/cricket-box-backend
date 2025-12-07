@@ -27,8 +27,8 @@ exports.sendRequest = asyncWrapper(async (req, res) => {
   }
 
   // Add incoming to receiver and outgoing to sender
-  receiver.requests.received.push({ userId: sender._id, username: sender.username });
-  sender.requests.sent.push({ userId: receiver._id, username: receiver.username });
+  receiver.requests.received.push({ userId: sender.id, username: sender.username });
+  sender.requests.sent.push({ userId: receiver.id, username: receiver.username });
 
   await receiver.save();
   await sender.save();
@@ -77,10 +77,10 @@ exports.acceptRequest = asyncWrapper(async (req, res) => {
 
   // Add to friends if not already
   if (!user.friends.some(f => f.userId.toString() === senderId)) {
-    user.friends.push({ userId: sender._id, username: sender.username });
+    user.friends.push({ userId: sender.id, username: sender.username });
   }
   if (!sender.friends.some(f => f.userId.toString() === userId)) {
-    sender.friends.push({ userId: user._id, username: user.username });
+    sender.friends.push({ userId: user.id, username: user.username });
   }
 
   await user.save();
@@ -138,7 +138,7 @@ exports.removeFriend = asyncWrapper(async (req, res) => {
 
 /**
  * Get incoming/outgoing requests & friends
- * Returns requests with id field (not _id) for frontend consistency
+ * Returns requests with id field (not id) for frontend consistency
  */
 exports.getRequestsAndFriends = asyncWrapper(async (req, res) => {
   const user = await User.findById(req.user.id)
@@ -149,17 +149,17 @@ exports.getRequestsAndFriends = asyncWrapper(async (req, res) => {
 
   if (!user) return res.status(404).json({ message: "User not found" });
 
-  // Transform _id to id for frontend
+  // Transform id to id for frontend
   const transformRequests = (requests) =>
     requests.map(r => ({
-      id: r.userId._id.toString(),
+      id: r.userId.id.toString(),
       username: r.userId.username,
       avatar: r.userId.avatar || null
     }));
 
   res.json({
     friends: user.friends.map(f => ({
-      id: f.userId._id.toString(),
+      id: f.userId.id.toString(),
       username: f.userId.username,
       avatar: f.userId.avatar || null
     })),

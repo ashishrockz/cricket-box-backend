@@ -22,7 +22,7 @@ const battingSchema = new mongoose.Schema(
     tripleHundreds: { type: Number, default: 0 },
     quadrupleHundreds: { type: Number, default: 0 },
   },
-  { _id: false }
+  { id: false }
 );
 
 // Bowling Schema
@@ -46,7 +46,7 @@ const bowlingSchema = new mongoose.Schema(
     fiveWickets: { type: Number, default: 0 },
     tenWickets: { type: Number, default: 0 },
   },
-  { _id: false }
+  { id: false }
 );
 
 const userSchema = new mongoose.Schema(

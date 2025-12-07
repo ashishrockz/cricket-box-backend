@@ -243,8 +243,8 @@ exports.assignUmpire = asyncWrapper(async (req, res) => {
   // remove if user is in either team (can't be both a team player and umpire)
   removePlayerFromTeams(room, userId.toString());
 
-  room.umpire = { userId: user._id, username: user.username };
-  if (!userInRoom(room, user._id)) room.participants.push(user._id);
+  room.umpire = { userId: user.id, username: user.username };
+  if (!userInRoom(room, user.id)) room.participants.push(user.id);
 
   await room.save();
   res.json({ message: "Umpire assigned", umpire: room.umpire, room });
@@ -335,7 +335,7 @@ exports.selectPlayer = asyncWrapper(async (req, res) => {
     return res.status(404).json({ message: "User to select not found" });
 
   const selectorUser = await User.findById(selectorId);
-  if (!isFriend(selectorUser, candidate._id)) {
+  if (!isFriend(selectorUser, candidate.id)) {
     return res
       .status(400)
       .json({ message: "You can only select players from your friends list" });
@@ -344,11 +344,11 @@ exports.selectPlayer = asyncWrapper(async (req, res) => {
   // ensure not in both teams or umpire
   if (
     room.umpire &&
-    room.umpire.userId.toString() === candidate._id.toString()
+    room.umpire.userId.toString() === candidate.id.toString()
   ) {
     return res.status(400).json({ message: "Selected user is the umpire" });
   }
-  const candidateIdStr = candidate._id.toString();
+  const candidateIdStr = candidate.id.toString();
   const inTeamA =
     room.teamA.players.some((p) => p.userId.toString() === candidateIdStr) ||
     (room.teamA.captain &&
@@ -362,8 +362,8 @@ exports.selectPlayer = asyncWrapper(async (req, res) => {
 
   // handle as captain assignment
   if (asCaptain) {
-    teamObj.captain = { userId: candidate._id, username: candidate.username };
-    if (!userInRoom(room, candidate._id)) room.participants.push(candidate._id);
+    teamObj.captain = { userId: candidate.id, username: candidate.username };
+    if (!userInRoom(room, candidate.id)) room.participants.push(candidate.id);
     await room.save();
     return res.json({ message: `Captain set for Team ${team}`, room });
   }
@@ -376,8 +376,8 @@ exports.selectPlayer = asyncWrapper(async (req, res) => {
       .json({ message: `Team ${team} already has maximum players` });
   }
 
-  teamObj.players.push({ userId: candidate._id, username: candidate.username });
-  if (!userInRoom(room, candidate._id)) room.participants.push(candidate._id);
+  teamObj.players.push({ userId: candidate.id, username: candidate.username });
+  if (!userInRoom(room, candidate.id)) room.participants.push(candidate.id);
 
   await room.save();
   // Emit socket event
@@ -385,7 +385,7 @@ exports.selectPlayer = asyncWrapper(async (req, res) => {
   io.to(id).emit("room:player-updated", {
     action: "added",
     team,
-    player: { userId: candidate._id, username: candidate.username },
+    player: { userId: candidate.id, username: candidate.username },
     asCaptain,
     timestamp: new Date(),
   });

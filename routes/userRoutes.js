@@ -26,7 +26,7 @@ const userCtrl = require("../controllers/userController");
  *             schema:
  *               type: object
  *               properties:
- *                 _id:
+ *                 id:
  *                   type: string
  *                 username:
  *                   type: string
@@ -42,7 +42,7 @@ const userCtrl = require("../controllers/userController");
  *                   items:
  *                     type: object
  *                     properties:
- *                       _id:
+ *                       id:
  *                         type: string
  *                       username:
  *                         type: string
@@ -54,7 +54,7 @@ const userCtrl = require("../controllers/userController");
  *                       items:
  *                         type: object
  *                         properties:
- *                           _id:
+ *                           id:
  *                             type: string
  *                           username:
  *                             type: string
@@ -63,7 +63,7 @@ const userCtrl = require("../controllers/userController");
  *                       items:
  *                         type: object
  *                         properties:
- *                           _id:
+ *                           id:
  *                             type: string
  *                           username:
  *                             type: string
@@ -91,7 +91,7 @@ const userCtrl = require("../controllers/userController");
  *               items:
  *                 type: object
  *                 properties:
- *                   _id:
+ *                   id:
  *                     type: string
  *                   username:
  *                     type: string
@@ -134,7 +134,7 @@ const userCtrl = require("../controllers/userController");
  *             schema:
  *               type: object
  *               properties:
- *                 _id:
+ *                 id:
  *                   type: string
  *                 username:
  *                   type: string
@@ -150,7 +150,7 @@ const userCtrl = require("../controllers/userController");
  *                   items:
  *                     type: object
  *                     properties:
- *                       _id:
+ *                       id:
  *                         type: string
  *                       username:
  *                         type: string
@@ -202,7 +202,7 @@ const userCtrl = require("../controllers/userController");
  *                   items:
  *                     type: object
  *                     properties:
- *                       _id:
+ *                       id:
  *                         type: string
  *                       username:
  *                         type: string

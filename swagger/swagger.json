@@ -128,7 +128,7 @@
       "Match": {
         "type": "object",
         "properties": {
-          "_id": {
+          "id": {
             "type": "string",
             "example": "507f1f77bcf86cd799439011"
           },

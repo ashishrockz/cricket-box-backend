@@ -55,7 +55,7 @@ const options = {
         Room: {
           type: "object",
           properties: {
-            _id: { type: "string" },
+            id: { type: "string" },
             roomCode: { type: "string" },
             name: { type: "string" },
             createdBy: { type: "string" },
@@ -116,7 +116,7 @@ const options = {
         Match: {
           type: "object",
           properties: {
-            _id: { type: "string" },
+            id: { type: "string" },
             roomId: { type: "string" },
             matchType: { type: "string" },
             tossWinner: { type: "string" },

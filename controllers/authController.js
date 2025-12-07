@@ -27,7 +27,7 @@ exports.signup = asyncWrapper(async (req, res) => {
     }
   }
 
-  res.status(201).json({ message: "User created", user: { id: user._id, username: user.username , emai:user.email} });
+  res.status(201).json({ message: "User created", user: { id: user.id, username: user.username , emai:user.email} });
 });
 
 exports.login = asyncWrapper(async (req, res) => {
@@ -40,7 +40,7 @@ exports.login = asyncWrapper(async (req, res) => {
   const match = await bcrypt.compare(password, user.password);
   if (!match) return res.status(401).json({ message: "Invalid credentials" });
 
-  const payload = { id: user._id, username: user.username };
+  const payload = { id: user.id, username: user.username };
   const token = jwt.sign(payload, process.env.JWT_SECRET || "the_box", { expiresIn: process.env.JWT_EXPIRES_IN || "600d" });
 
   res.json({ message: "Login successful", token, user: payload });
