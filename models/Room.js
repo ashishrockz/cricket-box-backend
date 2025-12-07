@@ -32,7 +32,7 @@ const roomSchema = new mongoose.Schema(
       type: String,
       required: true,
       unique: true,
-      default: () => shortid.generate(),
+      length: 6,
     },
     name: { type: String, default: "Cricket Room" },
     createdBy: {

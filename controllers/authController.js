@@ -27,7 +27,7 @@ exports.signup = asyncWrapper(async (req, res) => {
     }
   }
 
-  res.status(201).json({ message: "User created", user: { id: user._id, username: user.username } });
+  res.status(201).json({ message: "User created", user: { id: user._id, username: user.username , emai:user.email} });
 });
 
 exports.login = asyncWrapper(async (req, res) => {
