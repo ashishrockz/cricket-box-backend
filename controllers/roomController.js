@@ -4,15 +4,25 @@ const User = require("../models/User");
 const asyncWrapper = require("../utils/asyncWrapper");
 const mongoose = require("mongoose");
 
-/** Helpers */
+/** ==============================================
+ *  HELPER FUNCTIONS
+ * ============================================== */
+
+/**
+ * Check if a user is friends with another user
+ */
 const isFriend = (user, candidateId) => {
   if (!user || !user.friends) return false;
   return user.friends.some(
     (f) => f.userId.toString() === candidateId.toString()
   );
 };
+
+/**
+ * Generate a unique 6-character room code
+ */
 const generateRoomCode = () => {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@";
   let code = "";
   for (let i = 0; i < 6; i++) {
     code += chars.charAt(Math.floor(Math.random() * chars.length));
@@ -20,9 +30,680 @@ const generateRoomCode = () => {
   return code;
 };
 
+/**
+ * Check if user is already a participant in the room
+ */
 const userInRoom = (room, userId) => {
   return room.participants.some((p) => p.toString() === userId.toString());
 };
+
+/**
+ * Check if user has any role in the room (captain, player, or umpire)
+ */
+const userHasRole = (room, userId) => {
+  const userIdStr = userId.toString();
+  
+  // Check if umpire
+  if (room.umpire && room.umpire.userId.toString() === userIdStr) {
+    return { hasRole: true, role: 'umpire', team: null };
+  }
+  
+  // Check Team A
+  if (room.teamA.captain && room.teamA.captain.userId.toString() === userIdStr) {
+    return { hasRole: true, role: 'captain', team: 'A' };
+  }
+  if (room.teamA.players.some(p => p.userId.toString() === userIdStr)) {
+    return { hasRole: true, role: 'player', team: 'A' };
+  }
+  
+  // Check Team B
+  if (room.teamB.captain && room.teamB.captain.userId.toString() === userIdStr) {
+    return { hasRole: true, role: 'captain', team: 'B' };
+  }
+  if (room.teamB.players.some(p => p.userId.toString() === userIdStr)) {
+    return { hasRole: true, role: 'player', team: 'B' };
+  }
+  
+  return { hasRole: false, role: null, team: null };
+};
+
+/**
+ * Remove player from all teams and umpire role
+ */
+const removePlayerFromTeams = (room, userIdStr) => {
+  const removeFrom = (team) => {
+    team.players = team.players.filter(
+      (p) => p.userId.toString() !== userIdStr
+    );
+    if (team.captain && team.captain.userId.toString() === userIdStr) {
+      team.captain = null;
+    }
+  };
+  
+  removeFrom(room.teamA);
+  removeFrom(room.teamB);
+  
+  if (room.umpire && room.umpire.userId.toString() === userIdStr) {
+    room.umpire = null;
+  }
+  
+  room.participants = room.participants.filter(
+    (p) => p.toString() !== userIdStr
+  );
+};
+
+/**
+ * AUTO-ASSIGN ROLES BASED ON ROOM STATE
+ * This is the core logic for intelligent role assignment
+ */
+const autoAssignRole = async (room, user) => {
+  const userId = user._id || user.id;
+  const username = user.username;
+  
+  // Check if user already has a role
+  const roleStatus = userHasRole(room, userId);
+  if (roleStatus.hasRole) {
+    return {
+      assigned: false,
+      reason: `Already assigned as ${roleStatus.role} in Team ${roleStatus.team || 'N/A'}`,
+      currentRole: roleStatus
+    };
+  }
+  
+  // Count current participants with roles
+  const teamACount = (room.teamA.captain ? 1 : 0) + room.teamA.players.length;
+  const teamBCount = (room.teamB.captain ? 1 : 0) + room.teamB.players.length;
+  const hasUmpire = !!room.umpire;
+  
+  // RULE 1: If only creator exists, new joiner becomes Team B captain
+  if (room.participants.length === 1) {
+    room.teamB.captain = { userId, username };
+    return {
+      assigned: true,
+      role: 'captain',
+      team: 'B',
+      reason: 'First joiner - Auto-assigned as Team B Captain'
+    };
+  }
+  
+  // RULE 2: If no umpire assigned yet, suggest umpire role (but don't force)
+  if (!hasUmpire && room.participants.length === 2) {
+    // Don't auto-assign umpire, just notify
+    return {
+      assigned: false,
+      role: 'pending',
+      team: null,
+      reason: 'Waiting for manual role assignment. Umpire role available.',
+      suggestion: 'umpire'
+    };
+  }
+  
+  // RULE 3: Balance teams - assign to team with fewer players
+  if (teamACount < teamBCount) {
+    // Assign to Team A
+    if (!room.teamA.captain) {
+      room.teamA.captain = { userId, username };
+      return {
+        assigned: true,
+        role: 'captain',
+        team: 'A',
+        reason: 'Auto-assigned as Team A Captain (team balancing)'
+      };
+    } else {
+      room.teamA.players.push({ userId, username });
+      return {
+        assigned: true,
+        role: 'player',
+        team: 'A',
+        reason: 'Auto-assigned as Team A Player (team balancing)'
+      };
+    }
+  } else if (teamBCount < teamACount) {
+    // Assign to Team B
+    if (!room.teamB.captain) {
+      room.teamB.captain = { userId, username };
+      return {
+        assigned: true,
+        role: 'captain',
+        team: 'B',
+        reason: 'Auto-assigned as Team B Captain (team balancing)'
+      };
+    } else {
+      room.teamB.players.push({ userId, username });
+      return {
+        assigned: true,
+        role: 'player',
+        team: 'B',
+        reason: 'Auto-assigned as Team B Player (team balancing)'
+      };
+    }
+  } else {
+    // Teams are equal, assign to Team A by default
+    if (!room.teamA.captain) {
+      room.teamA.captain = { userId, username };
+      return {
+        assigned: true,
+        role: 'captain',
+        team: 'A',
+        reason: 'Auto-assigned as Team A Captain'
+      };
+    } else if (teamACount < room.maxPlayersPerTeam) {
+      room.teamA.players.push({ userId, username });
+      return {
+        assigned: true,
+        role: 'player',
+        team: 'A',
+        reason: 'Auto-assigned as Team A Player'
+      };
+    } else if (!room.teamB.captain) {
+      room.teamB.captain = { userId, username };
+      return {
+        assigned: true,
+        role: 'captain',
+        team: 'B',
+        reason: 'Auto-assigned as Team B Captain'
+      };
+    } else if (teamBCount < room.maxPlayersPerTeam) {
+      room.teamB.players.push({ userId, username });
+      return {
+        assigned: true,
+        role: 'player',
+        team: 'B',
+        reason: 'Auto-assigned as Team B Player'
+      };
+    }
+  }
+  
+  // If we reach here, room is full
+  return {
+    assigned: false,
+    role: 'spectator',
+    team: null,
+    reason: 'Room is full - joined as spectator'
+  };
+};
+
+/**
+ * Emit real-time notification to all room participants
+ */
+const emitRoomNotification = (io, roomId, event, data) => {
+  io.to(roomId).emit(event, {
+    ...data,
+    timestamp: new Date(),
+    roomId
+  });
+};
+
+/** ==============================================
+ *  ROOM MANAGEMENT ENDPOINTS
+ * ============================================== */
+
+/**
+ * CREATE ROOM
+ * POST /rooms
+ * body: { name }
+ */
+exports.createRoom = asyncWrapper(async (req, res) => {
+  const userId = req.user.id;
+  const { name } = req.body;
+
+  let roomCode;
+  let isUnique = false;
+
+  // Generate unique room code
+  while (!isUnique) {
+    roomCode = generateRoomCode();
+    const existingRoom = await Room.findOne({ roomCode });
+    if (!existingRoom) isUnique = true;
+  }
+
+  const room = await Room.create({
+    name: name || `${req.user.username}'s Room`,
+    roomCode,
+    createdBy: userId,
+    participants: [userId],
+  });
+
+  res.status(201).json({
+    message: "Room created successfully",
+    room,
+    info: "You are the room creator. Share the room code with others to join."
+  });
+});
+
+/**
+ * JOIN ROOM BY CODE WITH AUTO ROLE ASSIGNMENT
+ * POST /rooms/join
+ * body: { roomCode }
+ */
+exports.joinRoomByCode = asyncWrapper(async (req, res) => {
+  const userId = req.user.id;
+  const { roomCode } = req.body;
+  
+  if (!roomCode) {
+    return res.status(400).json({ message: "roomCode is required" });
+  }
+
+  const room = await Room.findOne({ roomCode });
+  if (!room) {
+    return res.status(404).json({ message: "Room not found" });
+  }
+
+  if (room.status !== "pending") {
+    return res.status(400).json({ 
+      message: "Cannot join: game already started or finished" 
+    });
+  }
+
+  // Get user details
+  const user = await User.findById(userId);
+  if (!user) {
+    return res.status(404).json({ message: "User not found" });
+  }
+
+  // Check if already in room
+  if (userInRoom(room, userId)) {
+    return res.status(400).json({ 
+      message: "You are already in this room",
+      room 
+    });
+  }
+
+  // Add to participants
+  room.participants.push(userId);
+
+  // AUTO-ASSIGN ROLE
+  const assignmentResult = await autoAssignRole(room, user);
+  
+  await room.save();
+
+  // Get Socket.IO instance
+  const io = req.app.get("io");
+
+  // EMIT TO ALL ROOM MEMBERS: New user joined
+  emitRoomNotification(io, room._id.toString(), "room:user-joined", {
+    user: {
+      userId: user._id,
+      username: user.username
+    },
+    assignment: assignmentResult,
+    totalParticipants: room.participants.length,
+    message: `${user.username} joined the room`
+  });
+
+  // EMIT ROLE ASSIGNMENT if auto-assigned
+  if (assignmentResult.assigned) {
+    emitRoomNotification(io, room._id.toString(), "room:role-assigned", {
+      user: {
+        userId: user._id,
+        username: user.username
+      },
+      role: assignmentResult.role,
+      team: assignmentResult.team,
+      reason: assignmentResult.reason,
+      message: `${user.username} assigned as ${assignmentResult.role}${assignmentResult.team ? ` in Team ${assignmentResult.team}` : ''}`
+    });
+  }
+
+  res.json({ 
+    message: "Joined room successfully", 
+    room,
+    assignment: assignmentResult
+  });
+});
+
+/**
+ * GET ROOM DETAILS
+ * GET /rooms/:id
+ */
+exports.getRoom = asyncWrapper(async (req, res) => {
+  const { id } = req.params;
+  
+  const room = await Room.findById(id)
+    .populate("participants", "username email")
+    .lean();
+    
+  if (!room) {
+    return res.status(404).json({ message: "Room not found" });
+  }
+  
+  // Add computed fields for client
+  const roomWithMetadata = {
+    ...room,
+    teamACount: (room.teamA.captain ? 1 : 0) + room.teamA.players.length,
+    teamBCount: (room.teamB.captain ? 1 : 0) + room.teamB.players.length,
+    hasUmpire: !!room.umpire,
+    isReady: room.overs > 0 && room.umpire && room.teamA.captain && room.teamB.captain
+  };
+  
+  res.json(roomWithMetadata);
+});
+
+/**
+ * ASSIGN UMPIRE
+ * POST /rooms/:id/assign-umpire
+ * body: { userId }
+ */
+exports.assignUmpire = asyncWrapper(async (req, res) => {
+  const callerId = req.user.id;
+  const { id } = req.params;
+  const { userId } = req.body;
+  
+  if (!userId) {
+    return res.status(400).json({ message: "userId required" });
+  }
+
+  const room = await Room.findById(id);
+  if (!room) {
+    return res.status(404).json({ message: "Room not found" });
+  }
+  
+  if (room.status !== "pending") {
+    return res.status(400).json({ 
+      message: "Cannot change umpire after game started" 
+    });
+  }
+
+  // Permission: only creator or existing umpire
+  const isCreator = room.createdBy.toString() === callerId;
+  const isCurrentUmpire = room.umpire && room.umpire.userId.toString() === callerId;
+  
+  if (!isCreator && !isCurrentUmpire) {
+    return res.status(403).json({ 
+      message: "Only room creator or current umpire can assign umpire" 
+    });
+  }
+
+  const user = await User.findById(userId);
+  if (!user) {
+    return res.status(404).json({ message: "User not found" });
+  }
+
+  // Remove user from any team roles
+  removePlayerFromTeams(room, userId.toString());
+
+  // Assign as umpire
+  room.umpire = { userId: user.id, username: user.username };
+  
+  if (!userInRoom(room, user.id)) {
+    room.participants.push(user.id);
+  }
+
+  await room.save();
+
+  // Emit socket event
+  const io = req.app.get("io");
+  emitRoomNotification(io, id, "room:umpire-assigned", {
+    umpire: room.umpire,
+    message: `${user.username} is now the umpire`
+  });
+
+  res.json({ 
+    message: "Umpire assigned successfully", 
+    umpire: room.umpire, 
+    room 
+  });
+});
+
+/**
+ * SET GAME SETTINGS
+ * POST /rooms/:id/set-settings
+ * body: { overs, maxPlayersPerTeam }
+ */
+exports.setSettings = asyncWrapper(async (req, res) => {
+  const callerId = req.user.id;
+  const { id } = req.params;
+  const { overs, maxPlayersPerTeam } = req.body;
+
+  const room = await Room.findById(id);
+  if (!room) {
+    return res.status(404).json({ message: "Room not found" });
+  }
+
+  // Only umpire can set settings
+  if (!room.umpire || room.umpire.userId.toString() !== callerId) {
+    return res.status(403).json({ 
+      message: "Only umpire can modify game settings" 
+    });
+  }
+
+  // Validate and update overs
+  if (typeof overs !== "undefined") {
+    const n = Number(overs);
+    if (!Number.isInteger(n) || n < 1 || n > 50) {
+      return res.status(400).json({ 
+        message: "Overs must be between 1 and 50" 
+      });
+    }
+    room.overs = n;
+  }
+  
+  // Validate and update max players per team
+  if (typeof maxPlayersPerTeam !== "undefined") {
+    const m = Number(maxPlayersPerTeam);
+    if (!Number.isInteger(m) || m < 1 || m > 11) {
+      return res.status(400).json({ 
+        message: "maxPlayersPerTeam must be between 1 and 11" 
+      });
+    }
+    room.maxPlayersPerTeam = m;
+  }
+
+  await room.save();
+
+  // Emit settings update to all participants
+  const io = req.app.get("io");
+  emitRoomNotification(io, id, "room:settings-updated", {
+    overs: room.overs,
+    maxPlayersPerTeam: room.maxPlayersPerTeam,
+    message: "Game settings updated"
+  });
+
+  res.json({ 
+    message: "Settings updated successfully", 
+    room 
+  });
+});
+
+/**
+ * SELECT/ADD PLAYER TO TEAM
+ * POST /rooms/:id/select-player
+ * body: { team: "A"|"B", userId, asCaptain: boolean }
+ */
+exports.selectPlayer = asyncWrapper(async (req, res) => {
+  const selectorId = req.user.id;
+  const { id } = req.params;
+  const { team, userId, asCaptain } = req.body;
+  
+  if (!team || !["A", "B"].includes(team)) {
+    return res.status(400).json({ message: "team must be 'A' or 'B'" });
+  }
+  if (!userId) {
+    return res.status(400).json({ message: "userId required" });
+  }
+
+  const room = await Room.findById(id);
+  if (!room) {
+    return res.status(404).json({ message: "Room not found" });
+  }
+  
+  if (room.status !== "pending") {
+    return res.status(400).json({ 
+      message: "Cannot select players after game started" 
+    });
+  }
+
+  // Must be participant
+  if (!userInRoom(room, selectorId)) {
+    return res.status(403).json({ 
+      message: "You must join the room first" 
+    });
+  }
+
+  // Permission check
+  const teamObj = team === "A" ? room.teamA : room.teamB;
+  const isCaptain = teamObj.captain && teamObj.captain.userId.toString() === selectorId;
+  const isCreator = room.createdBy.toString() === selectorId;
+  
+  if (!isCaptain && !isCreator) {
+    return res.status(403).json({
+      message: "Only team captain or room creator can select players",
+    });
+  }
+
+  // Get candidate user
+  const candidate = await User.findById(userId);
+  if (!candidate) {
+    return res.status(404).json({ message: "User not found" });
+  }
+
+  // Check friendship
+  const selectorUser = await User.findById(selectorId);
+  if (!isFriend(selectorUser, candidate.id)) {
+    return res.status(400).json({ 
+      message: "You can only select players from your friends list" 
+    });
+  }
+
+  // Check if already has a role
+  const roleStatus = userHasRole(room, candidate.id);
+  if (roleStatus.hasRole) {
+    return res.status(400).json({ 
+      message: `User is already ${roleStatus.role} in Team ${roleStatus.team || 'N/A'}` 
+    });
+  }
+
+  // Handle captain assignment
+  if (asCaptain) {
+    teamObj.captain = { userId: candidate.id, username: candidate.username };
+    if (!userInRoom(room, candidate.id)) {
+      room.participants.push(candidate.id);
+    }
+    await room.save();
+
+    // Emit event
+    const io = req.app.get("io");
+    emitRoomNotification(io, id, "room:captain-assigned", {
+      team,
+      captain: { userId: candidate.id, username: candidate.username },
+      message: `${candidate.username} is now captain of Team ${team}`
+    });
+
+    return res.json({ 
+      message: `Captain set for Team ${team}`, 
+      room 
+    });
+  }
+
+  // Check team size limit
+  const currentCount = teamObj.players.length + (teamObj.captain ? 1 : 0);
+  if (currentCount >= room.maxPlayersPerTeam) {
+    return res.status(400).json({ 
+      message: `Team ${team} already has maximum players (${room.maxPlayersPerTeam})` 
+    });
+  }
+
+  // Add as regular player
+  teamObj.players.push({ userId: candidate.id, username: candidate.username });
+  if (!userInRoom(room, candidate.id)) {
+    room.participants.push(candidate.id);
+  }
+
+  await room.save();
+
+  // Emit socket event
+  const io = req.app.get("io");
+  emitRoomNotification(io, id, "room:player-added", {
+    team,
+    player: { userId: candidate.id, username: candidate.username },
+    message: `${candidate.username} added to Team ${team}`
+  });
+
+  res.json({ 
+    message: `Player added to Team ${team}`, 
+    room 
+  });
+});
+
+/**
+ * REMOVE PLAYER FROM TEAM
+ * POST /rooms/:id/remove-player
+ * body: { team: "A"|"B", userId }
+ */
+exports.removePlayer = asyncWrapper(async (req, res) => {
+  const callerId = req.user.id;
+  const { id } = req.params;
+  const { team, userId } = req.body;
+  
+  if (!team || !["A", "B"].includes(team) || !userId) {
+    return res.status(400).json({ 
+      message: "team and userId required" 
+    });
+  }
+
+  const room = await Room.findById(id);
+  if (!room) {
+    return res.status(404).json({ message: "Room not found" });
+  }
+  
+  if (room.status !== "pending") {
+    return res.status(400).json({ 
+      message: "Cannot remove players after game started" 
+    });
+  }
+
+  const teamObj = team === "A" ? room.teamA : room.teamB;
+  const isCaptain = teamObj.captain && teamObj.captain.userId.toString() === callerId;
+  const isCreator = room.createdBy.toString() === callerId;
+  
+  if (!isCaptain && !isCreator) {
+    return res.status(403).json({ 
+      message: "Only team captain or room creator can remove players" 
+    });
+  }
+
+  const uid = userId.toString();
+  
+  // Get username before removal
+  let removedUsername = null;
+  const playerToRemove = teamObj.players.find(p => p.userId.toString() === uid);
+  if (playerToRemove) {
+    removedUsername = playerToRemove.username;
+  } else if (teamObj.captain && teamObj.captain.userId.toString() === uid) {
+    removedUsername = teamObj.captain.username;
+  }
+
+  // Remove from team
+  teamObj.players = teamObj.players.filter((p) => p.userId.toString() !== uid);
+  if (teamObj.captain && teamObj.captain.userId.toString() === uid) {
+    teamObj.captain = null;
+  }
+
+  // Remove from participants
+  room.participants = room.participants.filter((p) => p.toString() !== uid);
+  
+  await room.save();
+
+  // Emit socket event
+  const io = req.app.get("io");
+  emitRoomNotification(io, id, "room:player-removed", {
+    team,
+    userId,
+    username: removedUsername,
+    message: `${removedUsername || 'Player'} removed from Team ${team}`
+  });
+
+  res.json({ 
+    message: "Player removed successfully", 
+    room 
+  });
+});
+
+/**
+ * ADD STATIC PLAYER (non-user)
+ * POST /rooms/:id/add-static-player
+ * body: { team: "A"|"B", name, asCaptain: boolean }
+ */
 exports.addStaticPlayer = asyncWrapper(async (req, res) => {
   const selectorId = req.user.id;
   const { id } = req.params;
@@ -36,15 +717,17 @@ exports.addStaticPlayer = asyncWrapper(async (req, res) => {
   }
 
   const room = await Room.findById(id);
-  if (!room) return res.status(404).json({ message: "Room not found" });
-
-  if (room.status !== "pending") {
-    return res
-      .status(400)
-      .json({ message: "Cannot add players after game started" });
+  if (!room) {
+    return res.status(404).json({ message: "Room not found" });
   }
 
-  // check permission: only team captain or creator
+  if (room.status !== "pending") {
+    return res.status(400).json({ 
+      message: "Cannot add players after game started" 
+    });
+  }
+
+  // Permission check
   const teamObj = team === "A" ? room.teamA : room.teamB;
   const isCaptain = teamObj.captain?.userId.toString() === selectorId;
   const isCreator = room.createdBy.toString() === selectorId;
@@ -55,17 +738,34 @@ exports.addStaticPlayer = asyncWrapper(async (req, res) => {
     });
   }
 
-  // Captain?
+  // Add as static captain
   if (asCaptain) {
     teamObj.staticCaptain = name;
     await room.save();
-    return res.json({ message: "Static captain added", room });
+
+    const io = req.app.get("io");
+    emitRoomNotification(io, id, "room:static-captain-added", {
+      team,
+      name,
+      message: `${name} added as static captain of Team ${team}`
+    });
+
+    return res.json({ 
+      message: "Static captain added", 
+      room 
+    });
   }
 
-  // Add static player
+  // Add as static player
   teamObj.staticPlayers.push(name);
-
   await room.save();
+
+  const io = req.app.get("io");
+  emitRoomNotification(io, id, "room:static-player-added", {
+    team,
+    name,
+    message: `${name} added as static player to Team ${team}`
+  });
 
   res.json({
     message: "Static player added",
@@ -73,23 +773,11 @@ exports.addStaticPlayer = asyncWrapper(async (req, res) => {
   });
 });
 
-const removePlayerFromTeams = (room, userIdStr) => {
-  const removeFrom = (team) => {
-    team.players = team.players.filter(
-      (p) => p.userId.toString() !== userIdStr
-    );
-    if (team.captain && team.captain.userId.toString() === userIdStr) {
-      team.captain = null;
-    }
-  };
-  removeFrom(room.teamA);
-  removeFrom(room.teamB);
-  if (room.umpire && room.umpire.userId.toString() === userIdStr)
-    room.umpire = null;
-  room.participants = room.participants.filter(
-    (p) => p.toString() !== userIdStr
-  );
-};
+/**
+ * REMOVE STATIC PLAYER
+ * POST /rooms/:id/remove-static-player
+ * body: { team: "A"|"B", name }
+ */
 exports.removeStaticPlayer = asyncWrapper(async (req, res) => {
   const selectorId = req.user.id;
   const { id } = req.params;
@@ -104,23 +792,26 @@ exports.removeStaticPlayer = asyncWrapper(async (req, res) => {
   }
 
   const room = await Room.findById(id);
-  if (!room) return res.status(404).json({ message: "Room not found" });
+  if (!room) {
+    return res.status(404).json({ message: "Room not found" });
+  }
 
   if (room.status !== "pending") {
-    return res
-      .status(400)
-      .json({ message: "Cannot remove players after game started" });
+    return res.status(400).json({ 
+      message: "Cannot remove players after game started" 
+    });
   }
 
   const teamObj = team === "A" ? room.teamA : room.teamB;
 
-  // Permission: captain or creator only
-  const isCaptain =
-    teamObj.captain && teamObj.captain.userId.toString() === selectorId;
+  // Permission check
+  const isCaptain = teamObj.captain && teamObj.captain.userId.toString() === selectorId;
   const isCreator = room.createdBy.toString() === selectorId;
 
   if (!isCaptain && !isCreator) {
-    return res.status(403).json({ message: "Not allowed" });
+    return res.status(403).json({ 
+      message: "Only team captain or room creator can remove static players" 
+    });
   }
 
   // Remove static captain
@@ -135,339 +826,62 @@ exports.removeStaticPlayer = asyncWrapper(async (req, res) => {
 
   await room.save();
 
+  const io = req.app.get("io");
+  emitRoomNotification(io, id, "room:static-player-removed", {
+    team,
+    name,
+    message: `${name} removed from Team ${team}`
+  });
+
   res.json({
     message: "Static player removed",
     room,
   });
 });
 
-/** Create room
- * POST /rooms
- * body: { name }
- */
-exports.createRoom = asyncWrapper(async (req, res) => {
-  const userId = req.user.id;
-  const { name } = req.body;
-
-  let roomCode;
-  let isUnique = false;
-
-  while (!isUnique) {
-    roomCode = generateRoomCode();
-    const existingRoom = await Room.findOne({ roomCode });
-    if (!existingRoom) isUnique = true;
-  }
-
-  const room = await Room.create({
-    name: name || `${req.user.username}'s Room`,
-    roomCode, // ✅ 8-character unique code
-    createdBy: userId,
-    participants: [userId],
-  });
-
-  res.status(201).json({
-    message: "Room created",
-    room,
-  });
-});
-;
-
-/** Join room by roomCode
- * POST /rooms/join
- * body: { roomCode }
- */
-exports.joinRoomByCode = asyncWrapper(async (req, res) => {
-  const userId = req.user.id;
-  const { roomCode } = req.body;
-  if (!roomCode)
-    return res.status(400).json({ message: "roomCode is required" });
-
-  const room = await Room.findOne({ roomCode });
-  if (!room) return res.status(404).json({ message: "Room not found" });
-
-  if (room.status !== "pending")
-    return res
-      .status(400)
-      .json({ message: "Cannot join: game already started or finished" });
-
-  if (!userInRoom(room, userId)) {
-    room.participants.push(userId);
-    await room.save();
-  }
-
-  res.json({ message: "Joined room", room });
-});
-
-/** Get room
- * GET /rooms/:id
- */
-exports.getRoom = asyncWrapper(async (req, res) => {
-  const { id } = req.params;
-  const room = await Room.findById(id)
-    .populate("participants", "username")
-    .lean();
-  if (!room) return res.status(404).json({ message: "Room not found" });
-  res.json(room);
-});
-
-/** Assign umpire
- * POST /rooms/:id/assign-umpire
- * body: { userId } // the chosen umpire
- * Only creator or current umpire can set? We'll allow creator or current umpire.
- */
-exports.assignUmpire = asyncWrapper(async (req, res) => {
-  const callerId = req.user.id;
-  const { id } = req.params;
-  const { userId } = req.body;
-  if (!userId) return res.status(400).json({ message: "userId required" });
-
-  const room = await Room.findById(id);
-  if (!room) return res.status(404).json({ message: "Room not found" });
-  if (room.status !== "pending")
-    return res
-      .status(400)
-      .json({ message: "Cannot change umpire after start" });
-
-  // permission: only creator or existing umpire can set umpire
-  if (
-    room.createdBy.toString() !== callerId &&
-    !(room.umpire && room.umpire.userId.toString() === callerId)
-  ) {
-    return res.status(403).json({ message: "Not allowed to assign umpire" });
-  }
-
-  // user must be participant OR invite them by adding to participants
-  const user = await User.findById(userId);
-  if (!user) return res.status(404).json({ message: "User not found" });
-
-  // remove if user is in either team (can't be both a team player and umpire)
-  removePlayerFromTeams(room, userId.toString());
-
-  room.umpire = { userId: user.id, username: user.username };
-  if (!userInRoom(room, user.id)) room.participants.push(user.id);
-
-  await room.save();
-  res.json({ message: "Umpire assigned", umpire: room.umpire, room });
-});
-
-/** Set settings (overs, maxPlayersPerTeam)
- * POST /rooms/:id/set-settings
- * body: { overs, maxPlayersPerTeam }
- * only umpire can set
- */
-exports.setSettings = asyncWrapper(async (req, res) => {
-  const callerId = req.user.id;
-  const { id } = req.params;
-  const { overs, maxPlayersPerTeam } = req.body;
-
-  const room = await Room.findById(id);
-  if (!room) return res.status(404).json({ message: "Room not found" });
-
-  if (!room.umpire || room.umpire.userId.toString() !== callerId) {
-    return res.status(403).json({ message: "Only umpire can set settings" });
-  }
-
-  if (typeof overs !== "undefined") {
-    const n = Number(overs);
-    if (!Number.isInteger(n) || n < 0)
-      return res.status(400).json({ message: "Invalid overs" });
-    room.overs = n;
-  }
-  if (typeof maxPlayersPerTeam !== "undefined") {
-    const m = Number(maxPlayersPerTeam);
-    if (!Number.isInteger(m) || m < 0 || m > 11)
-      return res
-        .status(400)
-        .json({ message: "maxPlayersPerTeam must be 0..11" });
-    room.maxPlayersPerTeam = m;
-  }
-
-  await room.save();
-  const io = req.app.get("io");
-  io.to(id).emit("room:settings-updated", {
-    overs: room.overs,
-    maxPlayersPerTeam: room.maxPlayersPerTeam,
-    timestamp: new Date(),
-  });
-  res.json({ message: "Settings updated", room });
-});
-
-/** Select/add player to a team or set captain
- * POST /rooms/:id/select-player
- * body: { team: "A"|"B", userId, asCaptain: boolean }
- * selection must be made by the team captain or by the room creator? You said "team selects from their friends list" — we'll require that the selector (req.user) is captain of that team or room creator.
- */
-exports.selectPlayer = asyncWrapper(async (req, res) => {
-  const selectorId = req.user.id;
-  const { id } = req.params;
-  const { team, userId, asCaptain } = req.body;
-  if (!team || !["A", "B"].includes(team))
-    return res.status(400).json({ message: "team must be 'A' or 'B'" });
-  if (!userId) return res.status(400).json({ message: "userId required" });
-
-  const room = await Room.findById(id);
-  if (!room) return res.status(404).json({ message: "Room not found" });
-  if (room.status !== "pending")
-    return res
-      .status(400)
-      .json({ message: "Cannot select players after game started" });
-
-  // must be participant
-  if (!userInRoom(room, selectorId))
-    return res
-      .status(403)
-      .json({ message: "Join the room first to select players" });
-
-  // check permission: selector must be captain of that team OR room creator OR (optionally) the umpire - choose captain or creator
-  let teamObj = team === "A" ? room.teamA : room.teamB;
-  const isCaptain =
-    teamObj.captain && teamObj.captain.userId.toString() === selectorId;
-  const isCreator = room.createdBy.toString() === selectorId;
-  if (!isCaptain && !isCreator) {
-    return res.status(403).json({
-      message: "Only team captain or room creator can select players",
-    });
-  }
-
-  // ensure selected user exists and is friend of the selector
-  const candidate = await User.findById(userId);
-  if (!candidate)
-    return res.status(404).json({ message: "User to select not found" });
-
-  const selectorUser = await User.findById(selectorId);
-  if (!isFriend(selectorUser, candidate.id)) {
-    return res
-      .status(400)
-      .json({ message: "You can only select players from your friends list" });
-  }
-
-  // ensure not in both teams or umpire
-  if (
-    room.umpire &&
-    room.umpire.userId.toString() === candidate.id.toString()
-  ) {
-    return res.status(400).json({ message: "Selected user is the umpire" });
-  }
-  const candidateIdStr = candidate.id.toString();
-  const inTeamA =
-    room.teamA.players.some((p) => p.userId.toString() === candidateIdStr) ||
-    (room.teamA.captain &&
-      room.teamA.captain.userId.toString() === candidateIdStr);
-  const inTeamB =
-    room.teamB.players.some((p) => p.userId.toString() === candidateIdStr) ||
-    (room.teamB.captain &&
-      room.teamB.captain.userId.toString() === candidateIdStr);
-  if (inTeamA || inTeamB)
-    return res.status(400).json({ message: "User already in a team" });
-
-  // handle as captain assignment
-  if (asCaptain) {
-    teamObj.captain = { userId: candidate.id, username: candidate.username };
-    if (!userInRoom(room, candidate.id)) room.participants.push(candidate.id);
-    await room.save();
-    return res.json({ message: `Captain set for Team ${team}`, room });
-  }
-
-  // check team size limit
-  const currentCount = teamObj.players.length + (teamObj.captain ? 1 : 0);
-  if (currentCount >= room.maxPlayersPerTeam) {
-    return res
-      .status(400)
-      .json({ message: `Team ${team} already has maximum players` });
-  }
-
-  teamObj.players.push({ userId: candidate.id, username: candidate.username });
-  if (!userInRoom(room, candidate.id)) room.participants.push(candidate.id);
-
-  await room.save();
-  // Emit socket event
-  const io = req.app.get("io");
-  io.to(id).emit("room:player-updated", {
-    action: "added",
-    team,
-    player: { userId: candidate.id, username: candidate.username },
-    asCaptain,
-    timestamp: new Date(),
-  });
-
-  res.json({ message: `Player added to Team ${team}`, room });
-});
-
-/** Remove player from team
- * POST /rooms/:id/remove-player
- * body: { team: "A"|"B", userId }
- * allowed by team captain or room creator
- */
-exports.removePlayer = asyncWrapper(async (req, res) => {
-  const callerId = req.user.id;
-  const { id } = req.params;
-  const { team, userId } = req.body;
-  if (!team || !["A", "B"].includes(team) || !userId)
-    return res.status(400).json({ message: "team and userId required" });
-
-  const room = await Room.findById(id);
-  if (!room) return res.status(404).json({ message: "Room not found" });
-  if (room.status !== "pending")
-    return res
-      .status(400)
-      .json({ message: "Cannot remove players after game started" });
-
-  const teamObj = team === "A" ? room.teamA : room.teamB;
-  const isCaptain =
-    teamObj.captain && teamObj.captain.userId.toString() === callerId;
-  const isCreator = room.createdBy.toString() === callerId;
-  if (!isCaptain && !isCreator)
-    return res.status(403).json({ message: "Not allowed" });
-
-  const uid = userId.toString();
-  teamObj.players = teamObj.players.filter((p) => p.userId.toString() !== uid);
-  if (teamObj.captain && teamObj.captain.userId.toString() === uid)
-    teamObj.captain = null;
-
-  room.participants = room.participants.filter((p) => p.toString() !== uid);
-  await room.save();
-  const io = req.app.get("io");
-  io.to(id).emit("room:player-updated", {
-    action: "removed",
-    team,
-    playerId: userId,
-    timestamp: new Date(),
-  });
-  res.json({ message: "Player removed", room });
-});
-
-/** Start game
+/**
+ * START GAME
  * POST /rooms/:id/start
- * only umpire can start; enforce overs and players validations
  */
 exports.startGame = asyncWrapper(async (req, res) => {
   const callerId = req.user.id;
   const { id } = req.params;
 
   const room = await Room.findById(id);
-  if (!room) return res.status(404).json({ message: "Room not found" });
-
-  if (!room.umpire || room.umpire.userId.toString() !== callerId) {
-    return res.status(403).json({ message: "Only umpire can start the game" });
+  if (!room) {
+    return res.status(404).json({ message: "Room not found" });
   }
 
-  // validate overs
-  if (!Number.isInteger(room.overs) || room.overs < 0)
-    return res.status(400).json({ message: "Overs not set or invalid" });
-
-  // validate each team's players count between 0 and maxPlayersPerTeam
-  const countTeamA = (room.teamA.captain ? 1 : 0) + room.teamA.players.length;
-  const countTeamB = (room.teamB.captain ? 1 : 0) + room.teamB.players.length;
-  if (countTeamA < 0 || countTeamA > room.maxPlayersPerTeam)
-    return res.status(400).json({
-      message: `Team A players must be between 0 and ${room.maxPlayersPerTeam}`,
+  // Only umpire can start
+  if (!room.umpire || room.umpire.userId.toString() !== callerId) {
+    return res.status(403).json({ 
+      message: "Only umpire can start the game" 
     });
-  if (countTeamB < 0 || countTeamB > room.maxPlayersPerTeam)
-    return res.status(400).json({
-      message: `Team B players must be between 0 and ${room.maxPlayersPerTeam}`,
-    });
+  }
 
-  // ensure no user is in both teams or umpire simultaneously
+  // Validate overs
+  if (!Number.isInteger(room.overs) || room.overs < 1) {
+    return res.status(400).json({ 
+      message: "Please set valid overs (minimum 1)" 
+    });
+  }
+
+  // Validate team sizes
+  const countTeamA = (room.teamA.captain ? 1 : 0) + room.teamA.players.length + room.teamA.staticPlayers.length + (room.teamA.staticCaptain ? 1 : 0);
+  const countTeamB = (room.teamB.captain ? 1 : 0) + room.teamB.players.length + room.teamB.staticPlayers.length + (room.teamB.staticCaptain ? 1 : 0);
+  
+  if (countTeamA < 1 || countTeamA > room.maxPlayersPerTeam) {
+    return res.status(400).json({
+      message: `Team A must have 1-${room.maxPlayersPerTeam} players (currently ${countTeamA})`,
+    });
+  }
+  if (countTeamB < 1 || countTeamB > room.maxPlayersPerTeam) {
+    return res.status(400).json({
+      message: `Team B must have 1-${room.maxPlayersPerTeam} players (currently ${countTeamB})`,
+    });
+  }
+
+  // Check for duplicate user assignments
   const setIds = new Set();
   const addIf = (p) => {
     if (!p) return true;
@@ -477,91 +891,105 @@ exports.startGame = asyncWrapper(async (req, res) => {
     return true;
   };
 
-  if (room.umpire && !addIf(room.umpire))
-    return res
-      .status(400)
-      .json({ message: "Conflict: user in multiple roles" });
+  if (room.umpire && !addIf(room.umpire)) {
+    return res.status(400).json({ 
+      message: "Conflict: User assigned to multiple roles" 
+    });
+  }
 
-  for (const p of room.teamA.players || [])
-    if (!addIf(p))
-      return res
-        .status(400)
-        .json({ message: "Conflict: a user is assigned multiple roles" });
-  if (room.teamA.captain && !addIf(room.teamA.captain))
-    return res
-      .status(400)
-      .json({ message: "Conflict: a user is assigned multiple roles" });
+  for (const p of room.teamA.players || []) {
+    if (!addIf(p)) {
+      return res.status(400).json({ 
+        message: "Conflict: User assigned to multiple roles" 
+      });
+    }
+  }
+  if (room.teamA.captain && !addIf(room.teamA.captain)) {
+    return res.status(400).json({ 
+      message: "Conflict: User assigned to multiple roles" 
+    });
+  }
 
-  for (const p of room.teamB.players || [])
-    if (!addIf(p))
-      return res
-        .status(400)
-        .json({ message: "Conflict: a user is assigned multiple roles" });
-  if (room.teamB.captain && !addIf(room.teamB.captain))
-    return res
-      .status(400)
-      .json({ message: "Conflict: a user is assigned multiple roles" });
+  for (const p of room.teamB.players || []) {
+    if (!addIf(p)) {
+      return res.status(400).json({ 
+        message: "Conflict: User assigned to multiple roles" 
+      });
+    }
+  }
+  if (room.teamB.captain && !addIf(room.teamB.captain)) {
+    return res.status(400).json({ 
+      message: "Conflict: User assigned to multiple roles" 
+    });
+  }
 
+  // All validations passed - start game
   room.status = "in_progress";
   await room.save();
+
+  // Emit to all participants
   const io = req.app.get("io");
-  io.to(id).emit("room:status-changed", {
+  emitRoomNotification(io, id, "room:game-started", {
     status: "in_progress",
-    message: "Game has started!",
-    timestamp: new Date(),
+    message: "🏏 Game has started!",
+    teamA: {
+      count: countTeamA,
+      captain: room.teamA.captain?.username || room.teamA.staticCaptain
+    },
+    teamB: {
+      count: countTeamB,
+      captain: room.teamB.captain?.username || room.teamB.staticCaptain
+    }
   });
-  res.json({ message: "Game started", room });
+
+  res.json({ 
+    message: "Game started successfully", 
+    room 
+  });
 });
 
-/** Leave room
- * POST /rooms/:id/leave
- * body: {}
+/**
+ * DO TOSS
+ * POST /rooms/:id/toss
  */
-exports.leaveRoom = asyncWrapper(async (req, res) => {
-  const callerId = req.user.id;
-  const { id } = req.params;
-
-  const room = await Room.findById(id);
-  if (!room) return res.status(404).json({ message: "Room not found" });
-
-  removePlayerFromTeams(room, callerId);
-
-  // if no participants remain, optionally delete room - here we keep room but you can delete.
-  await room.save();
-  res.json({ message: "Left room", room });
-});
-
 exports.doToss = asyncWrapper(async (req, res) => {
   const callerId = req.user.id;
   const { id } = req.params;
 
   const room = await Room.findById(id);
-  if (!room) return res.status(404).json({ message: "Room not found" });
+  if (!room) {
+    return res.status(404).json({ message: "Room not found" });
+  }
 
+  // Only umpire can do toss
   if (!room.umpire || room.umpire.userId.toString() !== callerId) {
-    return res.status(403).json({ message: "Only umpire can start the toss" });
+    return res.status(403).json({ 
+      message: "Only umpire can start the toss" 
+    });
   }
 
   if (room.status !== "in_progress") {
-    return res
-      .status(400)
-      .json({ message: "Game must be started before toss" });
+    return res.status(400).json({ 
+      message: "Game must be started before toss" 
+    });
   }
 
   if (room.tossWinner) {
-    return res.status(400).json({ message: "Toss already completed" });
+    return res.status(400).json({ 
+      message: "Toss already completed" 
+    });
   }
 
-  // AUTO TOSS
+  // Random toss
   const winner = Math.random() < 0.5 ? "A" : "B";
   room.tossWinner = winner;
   await room.save();
 
+  // Emit toss result
   const io = req.app.get("io");
-  io.to(id).emit("toss:result", {
+  emitRoomNotification(io, id, "room:toss-result", {
     winner,
-    message: `Team ${winner} won the toss!`,
-    timestamp: new Date(),
+    message: `🪙 Team ${winner} won the toss!`
   });
 
   res.json({
@@ -571,29 +999,36 @@ exports.doToss = asyncWrapper(async (req, res) => {
   });
 });
 
+/**
+ * CHOOSE TOSS OPTION (bat/ball)
+ * POST /rooms/:id/toss-choice
+ * body: { choice: "bat"|"ball" }
+ */
 exports.chooseTossOption = asyncWrapper(async (req, res) => {
   const callerId = req.user.id;
   const { id } = req.params;
-  const { choice } = req.body; // "bat" or "ball"
+  const { choice } = req.body;
 
   if (!["bat", "ball"].includes(choice)) {
-    return res.status(400).json({ message: "choice must be 'bat' or 'ball'" });
+    return res.status(400).json({ 
+      message: "choice must be 'bat' or 'ball'" 
+    });
   }
 
   const room = await Room.findById(id);
-  if (!room) return res.status(404).json({ message: "Room not found" });
-
-  if (!room.tossWinner) {
-    return res.status(400).json({ message: "Toss not done yet" });
+  if (!room) {
+    return res.status(404).json({ message: "Room not found" });
   }
 
-  // Determine which team won
+  if (!room.tossWinner) {
+    return res.status(400).json({ 
+      message: "Toss not done yet" 
+    });
+  }
+
+  // Only winning team's captain or creator can choose
   const winningTeamObj = room.tossWinner === "A" ? room.teamA : room.teamB;
-
-  const isCaptain =
-    winningTeamObj.captain &&
-    winningTeamObj.captain.userId.toString() === callerId;
-
+  const isCaptain = winningTeamObj.captain && winningTeamObj.captain.userId.toString() === callerId;
   const isCreator = room.createdBy.toString() === callerId;
 
   if (!isCaptain && !isCreator) {
@@ -605,29 +1040,74 @@ exports.chooseTossOption = asyncWrapper(async (req, res) => {
   room.tossChoice = choice;
   await room.save();
   
+  // Emit toss choice
   const io = req.app.get("io");
-  io.to(id).emit("toss:choice-announced", {
+  emitRoomNotification(io, id, "room:toss-choice", {
     team: room.tossWinner,
     choice,
-    message: `Team ${room.tossWinner} chose to ${choice}`,
-    timestamp: new Date()
+    message: `Team ${room.tossWinner} chose to ${choice} first`
   });
   
-  res.json({ message: `Team ${room.tossWinner} chose to ${choice}`, tossChoice: choice, room });
+  res.json({ 
+    message: `Team ${room.tossWinner} chose to ${choice}`, 
+    tossChoice: choice, 
+    room 
+  });
 });
 
-/** Get rooms created by the logged-in user
+/**
+ * LEAVE ROOM
+ * POST /rooms/:id/leave
+ */
+exports.leaveRoom = asyncWrapper(async (req, res) => {
+  const callerId = req.user.id;
+  const { id } = req.params;
+
+  const room = await Room.findById(id);
+  if (!room) {
+    return res.status(404).json({ message: "Room not found" });
+  }
+
+  // Get user info before removal
+  const user = await User.findById(callerId);
+  const username = user ? user.username : "User";
+
+  // Remove from all roles
+  removePlayerFromTeams(room, callerId);
+
+  await room.save();
+
+  // Emit leave event
+  const io = req.app.get("io");
+  emitRoomNotification(io, id, "room:user-left", {
+    userId: callerId,
+    username,
+    message: `${username} left the room`,
+    remainingParticipants: room.participants.length
+  });
+
+  res.json({ 
+    message: "Left room successfully", 
+    room 
+  });
+});
+
+/**
+ * GET MY CREATED ROOMS
  * GET /rooms/my-created-rooms
  */
 exports.getMyCreatedRooms = asyncWrapper(async (req, res) => {
   const userId = req.user.id;
 
   const rooms = await Room.find({ createdBy: userId })
-    .populate("participants", "username")
+    .populate("participants", "username email")
     .sort({ createdAt: -1 });
 
   res.json({
     message: "My created rooms",
+    count: rooms.length,
     rooms,
   });
 });
+
+module.exports = exports;
