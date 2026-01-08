@@ -460,10 +460,20 @@ exports.setSettings = asyncWrapper(async (req, res) => {
     return res.status(404).json({ message: "Room not found" });
   }
 
-  // Only umpire can set settings
-  if (!room.umpire || room.umpire.userId.toString() !== callerId) {
-    return res.status(403).json({ 
-      message: "Only umpire can modify game settings" 
+  // Check if caller is umpire or room creator (when no umpire is assigned or only participant)
+  const isUmpire = room.umpire && room.umpire.userId.toString() === callerId;
+  const isCreator = room.createdBy.toString() === callerId;
+  const noUmpireAssigned = !room.umpire;
+  const isOnlyParticipant = room.participants.length === 1;
+
+  // Allow settings to be modified by:
+  // 1. Umpire (if assigned)
+  // 2. Room creator (if no umpire is assigned OR if creator is the only participant)
+  if (!isUmpire && !(isCreator && (noUmpireAssigned || isOnlyParticipant))) {
+    return res.status(403).json({
+      message: noUmpireAssigned || isOnlyParticipant
+        ? "Only room creator can modify game settings when no umpire is assigned"
+        : "Only umpire can modify game settings"
     });
   }
 
@@ -471,19 +481,19 @@ exports.setSettings = asyncWrapper(async (req, res) => {
   if (typeof overs !== "undefined") {
     const n = Number(overs);
     if (!Number.isInteger(n) || n < 1 || n > 50) {
-      return res.status(400).json({ 
-        message: "Overs must be between 1 and 50" 
+      return res.status(400).json({
+        message: "Overs must be between 1 and 50"
       });
     }
     room.overs = n;
   }
-  
+
   // Validate and update max players per team
   if (typeof maxPlayersPerTeam !== "undefined") {
     const m = Number(maxPlayersPerTeam);
     if (!Number.isInteger(m) || m < 1 || m > 11) {
-      return res.status(400).json({ 
-        message: "maxPlayersPerTeam must be between 1 and 11" 
+      return res.status(400).json({
+        message: "maxPlayersPerTeam must be between 1 and 11"
       });
     }
     room.maxPlayersPerTeam = m;
@@ -499,9 +509,9 @@ exports.setSettings = asyncWrapper(async (req, res) => {
     message: "Game settings updated"
   });
 
-  res.json({ 
-    message: "Settings updated successfully", 
-    room 
+  res.json({
+    message: "Settings updated successfully",
+    room
   });
 });
 
@@ -852,24 +862,34 @@ exports.startGame = asyncWrapper(async (req, res) => {
     return res.status(404).json({ message: "Room not found" });
   }
 
-  // Only umpire can start
-  if (!room.umpire || room.umpire.userId.toString() !== callerId) {
-    return res.status(403).json({ 
-      message: "Only umpire can start the game" 
+  // Check if caller is umpire or room creator (when no umpire is assigned or only participant)
+  const isUmpire = room.umpire && room.umpire.userId.toString() === callerId;
+  const isCreator = room.createdBy.toString() === callerId;
+  const noUmpireAssigned = !room.umpire;
+  const isOnlyParticipant = room.participants.length === 1;
+
+  // Allow game to be started by:
+  // 1. Umpire (if assigned)
+  // 2. Room creator (if no umpire is assigned OR if creator is the only participant)
+  if (!isUmpire && !(isCreator && (noUmpireAssigned || isOnlyParticipant))) {
+    return res.status(403).json({
+      message: noUmpireAssigned || isOnlyParticipant
+        ? "Only room creator can start the game when no umpire is assigned"
+        : "Only umpire can start the game"
     });
   }
 
   // Validate overs
   if (!Number.isInteger(room.overs) || room.overs < 1) {
-    return res.status(400).json({ 
-      message: "Please set valid overs (minimum 1)" 
+    return res.status(400).json({
+      message: "Please set valid overs (minimum 1)"
     });
   }
 
   // Validate team sizes
   const countTeamA = (room.teamA.captain ? 1 : 0) + room.teamA.players.length + room.teamA.staticPlayers.length + (room.teamA.staticCaptain ? 1 : 0);
   const countTeamB = (room.teamB.captain ? 1 : 0) + room.teamB.players.length + room.teamB.staticPlayers.length + (room.teamB.staticCaptain ? 1 : 0);
-  
+
   if (countTeamA < 1 || countTeamA > room.maxPlayersPerTeam) {
     return res.status(400).json({
       message: `Team A must have 1-${room.maxPlayersPerTeam} players (currently ${countTeamA})`,
@@ -892,34 +912,34 @@ exports.startGame = asyncWrapper(async (req, res) => {
   };
 
   if (room.umpire && !addIf(room.umpire)) {
-    return res.status(400).json({ 
-      message: "Conflict: User assigned to multiple roles" 
+    return res.status(400).json({
+      message: "Conflict: User assigned to multiple roles"
     });
   }
 
   for (const p of room.teamA.players || []) {
     if (!addIf(p)) {
-      return res.status(400).json({ 
-        message: "Conflict: User assigned to multiple roles" 
+      return res.status(400).json({
+        message: "Conflict: User assigned to multiple roles"
       });
     }
   }
   if (room.teamA.captain && !addIf(room.teamA.captain)) {
-    return res.status(400).json({ 
-      message: "Conflict: User assigned to multiple roles" 
+    return res.status(400).json({
+      message: "Conflict: User assigned to multiple roles"
     });
   }
 
   for (const p of room.teamB.players || []) {
     if (!addIf(p)) {
-      return res.status(400).json({ 
-        message: "Conflict: User assigned to multiple roles" 
+      return res.status(400).json({
+        message: "Conflict: User assigned to multiple roles"
       });
     }
   }
   if (room.teamB.captain && !addIf(room.teamB.captain)) {
-    return res.status(400).json({ 
-      message: "Conflict: User assigned to multiple roles" 
+    return res.status(400).json({
+      message: "Conflict: User assigned to multiple roles"
     });
   }
 
@@ -942,9 +962,9 @@ exports.startGame = asyncWrapper(async (req, res) => {
     }
   });
 
-  res.json({ 
-    message: "Game started successfully", 
-    room 
+  res.json({
+    message: "Game started successfully",
+    room
   });
 });
 
@@ -961,22 +981,32 @@ exports.doToss = asyncWrapper(async (req, res) => {
     return res.status(404).json({ message: "Room not found" });
   }
 
-  // Only umpire can do toss
-  if (!room.umpire || room.umpire.userId.toString() !== callerId) {
-    return res.status(403).json({ 
-      message: "Only umpire can start the toss" 
+  // Check if caller is umpire or room creator (when no umpire is assigned or only participant)
+  const isUmpire = room.umpire && room.umpire.userId.toString() === callerId;
+  const isCreator = room.createdBy.toString() === callerId;
+  const noUmpireAssigned = !room.umpire;
+  const isOnlyParticipant = room.participants.length === 1;
+
+  // Allow toss to be performed by:
+  // 1. Umpire (if assigned)
+  // 2. Room creator (if no umpire is assigned OR if creator is the only participant)
+  if (!isUmpire && !(isCreator && (noUmpireAssigned || isOnlyParticipant))) {
+    return res.status(403).json({
+      message: noUmpireAssigned || isOnlyParticipant
+        ? "Only room creator can start the toss when no umpire is assigned"
+        : "Only umpire can start the toss"
     });
   }
 
   if (room.status !== "in_progress") {
-    return res.status(400).json({ 
-      message: "Game must be started before toss" 
+    return res.status(400).json({
+      message: "Game must be started before toss"
     });
   }
 
   if (room.tossWinner) {
-    return res.status(400).json({ 
-      message: "Toss already completed" 
+    return res.status(400).json({
+      message: "Toss already completed"
     });
   }
 
