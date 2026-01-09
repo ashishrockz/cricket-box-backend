@@ -17,8 +17,8 @@ const server = http.createServer(app);
 // ================= CORS FIX (IMPORTANT) =======
 app.use(
   cors({
-    origin: ["http://localhost:5173", "http://localhost:3000", "https://cricket-box-backend.onrender.com"],
-    credentials: true,
+    origin: true,        // allow all origins dynamically
+    credentials: true,  // allow cookies / auth headers
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
@@ -30,7 +30,7 @@ app.use(express.json());
 // ================= SOCKET.IO =================
 const io = socketIO(server, {
   cors: {
-    origin: ["http://localhost:3000", "http://localhost:5173" ,"https://cricket-box-backend.onrender.com"],
+    origin: true,
     credentials: true,
   },
 });
