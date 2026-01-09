@@ -14,7 +14,7 @@ router.use(authenticate);
 
 /**
  * @swagger
- * /api/matches:
+ * /api/matches/create:
  *   post:
  *     tags: [Matches]
  *     summary: Create a match from a room (after toss)
