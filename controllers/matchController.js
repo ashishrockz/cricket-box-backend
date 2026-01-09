@@ -88,75 +88,11 @@ function swapStrike(innings) {
  * Create Match from room (after toss and choice)
  * body: { roomId, matchType, oversPerInnings }
  */
-exports.createMatch = asyncWrapper(async (req, res) => {
-  try {
-    const { roomId, matchType, oversPerInnings } = req.body;
-
-    if (!roomId)
-      return res.status(400).json({ message: "roomId required" });
-
-    const room = await Room.findById(roomId);
-    if (!room)
-      return res.status(404).json({ message: "Room not found" });
-
-    // Validate toss info
-    if (!room.tossWinner || !room.tossChoice)
-      return res.status(400).json({
-        message: "Toss must be completed before creating match",
-      });
-
-    const oversLimit =
-      !isNaN(Number(oversPerInnings)) && Number(oversPerInnings) > 0
-        ? Number(oversPerInnings)
-        : room.overs || 20;
-
-    const battingTeam =
-      room.tossChoice === "bat"
-        ? room.tossWinner
-        : room.tossWinner === "A"
-        ? "B"
-        : "A";
-
-    const innings = [
-      {
-        teamName: battingTeam,
-        oversLimit,
-      },
-      {
-        teamName: battingTeam === "A" ? "B" : "A",
-        oversLimit,
-      },
-    ];
-
-    const match = await Match.create({
-      roomId,
-      matchType: matchType || "T20",
-      tossWinner: room.tossWinner,
-      tossChoice: room.tossChoice,
-      innings,
-      status: "in_progress",
-      currentInningsIndex: 0,
-    });
-
-    res.status(201).json({
-      message: "Match created successfully",
-      match,
-    });
-  } catch (err) {
-    console.error("CREATE MATCH ERROR:", err);
-    return res.status(500).json({ message: "Failed to create match" });
-  }
-});
-
-/**
- * Initialize innings: set opening batsmen and opening bowler
- * POST /match/:id/start-innings
- * body: { striker, nonStriker, bowler } // names or IDs (strings)
- */
 exports.startInnings = asyncWrapper(async (req, res) => {
   const userId = req.user.id;
   const { id } = req.params;
   const { striker, nonStriker, bowler } = req.body;
+
   if (!striker || !nonStriker || !bowler)
     return res
       .status(400)
@@ -165,21 +101,23 @@ exports.startInnings = asyncWrapper(async (req, res) => {
   const match = await Match.findById(id).populate("roomId");
   if (!match) return res.status(404).json({ message: "Match not found" });
 
-  // only umpire can initialize innings
-  if (
-    !match.roomId.umpire ||
-    match.roomId.umpire.userId.toString() !== userId
-  ) {
-    return res.status(403).json({ message: "Only umpire can start innings" });
+  const isUmpire =
+    match.roomId.umpire &&
+    match.roomId.umpire.userId.toString() === userId;
+
+  const isMatchCreator = match.createdBy.toString() === userId;
+
+  if (!isUmpire && !isMatchCreator) {
+    return res.status(403).json({
+      message: "Only umpire or match creator can start innings",
+    });
   }
 
   const idx = match.currentInningsIndex;
   const innings = match.innings[idx];
 
-  // set opening batsmen in currentPartnership
   innings.currentPartnership = { striker, nonStriker, runs: 0 };
 
-  // ensure batsman records exist
   ensureBatsman(innings, striker);
   ensureBatsman(innings, nonStriker);
   ensureBowler(innings, bowler);
@@ -187,6 +125,7 @@ exports.startInnings = asyncWrapper(async (req, res) => {
   await match.save();
   res.json({ message: "Innings initialized", match });
 });
+
 
 /**
  * Add a ball (umpire only)
