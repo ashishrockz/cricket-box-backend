@@ -89,42 +89,63 @@ function swapStrike(innings) {
  * body: { roomId, matchType, oversPerInnings }
  */
 exports.createMatch = asyncWrapper(async (req, res) => {
-  const { roomId, matchType, oversPerInnings } = req.body;
-  if (!roomId) return res.status(400).json({ message: "roomId required" });
+  try {
+    const { roomId, matchType, oversPerInnings } = req.body;
 
-  const room = await Room.findById(roomId);
-  if (!room) return res.status(404).json({ message: "Room not found" });
+    if (!roomId)
+      return res.status(400).json({ message: "roomId required" });
 
-  // default innings array with two entries
-  const innings = [
-    {
-      teamName:
-        room.tossChoice === "bat"
-          ? room.tossWinner === "A"
-            ? "A"
-            : "B"
-          : room.tossWinner === "A"
-          ? "B"
-          : "A",
-      oversLimit: oversPerInnings || room.overs || 20,
-    },
-    {
-      teamName: null, // will set when second innings starts
-      oversLimit: oversPerInnings || room.overs || 20,
-    },
-  ];
+    const room = await Room.findById(roomId);
+    if (!room)
+      return res.status(404).json({ message: "Room not found" });
 
-  const m = await Match.create({
-    roomId,
-    matchType: matchType || "T20",
-    tossWinner: room.tossWinner,
-    tossChoice: room.tossChoice,
-    innings,
-    status: "in_progress",
-    currentInningsIndex: 0,
-  });
+    // Validate toss info
+    if (!room.tossWinner || !room.tossChoice)
+      return res.status(400).json({
+        message: "Toss must be completed before creating match",
+      });
 
-  res.status(201).json({ message: "Match created", match: m });
+    const oversLimit =
+      !isNaN(Number(oversPerInnings)) && Number(oversPerInnings) > 0
+        ? Number(oversPerInnings)
+        : room.overs || 20;
+
+    const battingTeam =
+      room.tossChoice === "bat"
+        ? room.tossWinner
+        : room.tossWinner === "A"
+        ? "B"
+        : "A";
+
+    const innings = [
+      {
+        teamName: battingTeam,
+        oversLimit,
+      },
+      {
+        teamName: battingTeam === "A" ? "B" : "A",
+        oversLimit,
+      },
+    ];
+
+    const match = await Match.create({
+      roomId,
+      matchType: matchType || "T20",
+      tossWinner: room.tossWinner,
+      tossChoice: room.tossChoice,
+      innings,
+      status: "in_progress",
+      currentInningsIndex: 0,
+    });
+
+    res.status(201).json({
+      message: "Match created successfully",
+      match,
+    });
+  } catch (err) {
+    console.error("CREATE MATCH ERROR:", err);
+    return res.status(500).json({ message: "Failed to create match" });
+  }
 });
 
 /**
