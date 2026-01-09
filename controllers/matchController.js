@@ -193,10 +193,7 @@ exports.addBall = asyncWrapper(async (req, res) => {
   if (!match) return res.status(404).json({ message: "Match not found" });
 
   // only umpire can add ball
-  if (
-    !match.roomId.umpire ||
-    match.roomId.umpire.userId.toString() !== userId
-  ) {
+  if (!isMatchAdmin(match, req.user.id)) {
     return res.status(403).json({ message: "Only umpire can update ball" });
   }
 
