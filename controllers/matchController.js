@@ -870,7 +870,8 @@ exports.getUserMatches = asyncWrapper(async (req, res) => {
       isParticipant
     ) {
       played.push({
-        matchId: match.id,
+        _id: match._id,
+        matchId: match._id,
         status: match.status,
         result: match.result,
         tossWinner: match.tossWinner,
