@@ -74,7 +74,13 @@ function recomputeBowlingEconomy(bowler) {
   if (bowler.balls === 0) return 0;
   return parseFloat((bowler.runs / overs).toFixed(2));
 }
-
+function isMatchAdmin(match, userId) {
+  return (
+    match.createdBy?.toString() === userId ||
+    match.roomId.createdBy?.toString() === userId ||
+    match.roomId.umpire?.userId?.toString() === userId
+  );
+}
 // switch strike utility
 function swapStrike(innings) {
   const cur = innings.currentPartnership;
@@ -149,10 +155,7 @@ exports.addBall = asyncWrapper(async (req, res) => {
   if (!match) return res.status(404).json({ message: "Match not found" });
 
   // only umpire can add ball
-  if (
-    !match.roomId.umpire ||
-    match.roomId.umpire.userId.toString() !== userId
-  ) {
+  if (!isMatchAdmin(match, req.user.id)) {
     return res.status(403).json({ message: "Only umpire can update ball" });
   }
 
@@ -449,10 +452,7 @@ exports.endInnings = asyncWrapper(async (req, res) => {
   const match = await Match.findById(id).populate("roomId");
   if (!match) return res.status(404).json({ message: "Match not found" });
 
-  if (
-    !match.roomId.umpire ||
-    match.roomId.umpire.userId.toString() !== userId
-  ) {
+  if (!isMatchAdmin(match, req.user.id)){
     return res.status(403).json({ message: "Only umpire can end innings" });
   }
 
@@ -554,10 +554,7 @@ exports.selectNextBatsman = asyncWrapper(async (req, res) => {
   if (!match) return res.status(404).json({ message: "Match not found" });
 
   // Permission → only Umpire
-  if (
-    !match.roomId.umpire ||
-    match.roomId.umpire.userId.toString() !== umpireId
-  ) {
+  if (!isMatchAdmin(match, req.user.id)){
     return res
       .status(403)
       .json({ message: "Only umpire can select next batsman" });
@@ -603,10 +600,7 @@ exports.selectNextBowler = asyncWrapper(async (req, res) => {
   if (!match) return res.status(404).json({ message: "Match not found" });
 
   // Only umpire can choose bowler
-  if (
-    !match.roomId.umpire ||
-    match.roomId.umpire.userId.toString() !== umpireId
-  ) {
+  if (!isMatchAdmin(match, req.user.id)) {
     return res
       .status(403)
       .json({ message: "Only umpire can select next bowler" });
