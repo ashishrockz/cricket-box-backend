@@ -168,7 +168,7 @@ router.use(authenticate);
  */
 
 // create match from room (after toss)
-router.post("/", matchCtrl.createMatch);
+router.post("/create", matchCtrl.createMatch);
 
 // initialize innings (set openers & bowler)
 router.post("/:id/start-innings", matchCtrl.startInnings);
