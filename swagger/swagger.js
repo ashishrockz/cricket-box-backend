@@ -10,7 +10,7 @@ const options = {
       description: "Cricket Box backend API (Rooms, Matches, Friends, Users, Scoring)"
     },
     servers: [
-      { url: "http://localhost:5000", description: "Local server" }
+      { url: "https://cricket-box-backend.onrender.com", description: "dev server" }
     ],
     components: {
       securitySchemes: {
